@@ -175,7 +175,7 @@ export function ImageViewer({ src, alt, onSwipe }: ImageViewerProps) {
         zoomTo(transformRef.current.s > 1.05 ? 1 : 2.5);
       }}
     >
-      {/* eslint-disable-next-line @next/next/no-img-element -- blob: URL from IndexedDB */}
+      {/* eslint-disable-next-line @next/next/no-img-element -- remote user media from cloud storage */}
       <img
         ref={imgRef}
         src={src}

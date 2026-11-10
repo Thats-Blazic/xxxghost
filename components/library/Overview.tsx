@@ -2,7 +2,6 @@
 
 import { Film, FolderOpen, HardDrive, Image as ImageIcon, type LucideIcon } from "lucide-react";
 import { useMemo } from "react";
-import { useStorageEstimate } from "@/hooks/useStorageEstimate";
 import { cn } from "@/lib/cn";
 import { formatBytes } from "@/lib/format";
 import { computeStats } from "@/lib/stats";
@@ -47,14 +46,12 @@ function StatCard({ icon: Icon, label, value, hint, tone, delay, loading }: Stat
 
 function StorageCard({ items, loading }: { items: MediaMeta[]; loading: boolean }) {
   const stats = useMemo(() => computeStats(items), [items]);
-  const estimate = useStorageEstimate(stats.totalBytes);
   const total = stats.totalBytes || 1;
   const segments = [
     { label: "Images", bytes: stats.imageBytes, color: "bg-violet-500" },
     { label: "Videos", bytes: stats.videoBytes, color: "bg-fuchsia-500" },
     { label: "Trash", bytes: stats.trashBytes, color: "bg-zinc-600" },
   ];
-  const quotaPercent = estimate ? (stats.totalBytes / estimate.quota) * 100 : null;
 
   return (
     <div className="relative animate-rise overflow-hidden rounded-2xl border border-line bg-surface p-5 [animation-delay:240ms] sm:p-6">
@@ -66,11 +63,7 @@ function StorageCard({ items, loading }: { items: MediaMeta[]; loading: boolean 
           </span>
           Storage used
         </div>
-        {estimate && quotaPercent !== null && (
-          <span className="rounded-md bg-white/6 px-2 py-1 text-[11px] font-medium tabular-nums text-zinc-400">
-            {quotaPercent < 0.1 ? "<0.1" : quotaPercent.toFixed(1)}% of browser quota
-          </span>
-        )}
+        <span className="rounded-md bg-white/6 px-2 py-1 text-[11px] font-medium text-zinc-400">In the cloud</span>
       </div>
 
       {loading ? (
@@ -78,9 +71,7 @@ function StorageCard({ items, loading }: { items: MediaMeta[]; loading: boolean 
       ) : (
         <p className="relative mt-4 text-4xl font-semibold tracking-tight">{formatBytes(stats.totalBytes)}</p>
       )}
-      {estimate && (
-        <p className="relative mt-1 text-xs text-zinc-500">{formatBytes(estimate.quota - estimate.usage, 0)} still free in this browser</p>
-      )}
+      <p className="relative mt-1 text-xs text-zinc-500">Available on every device you sign in from</p>
 
       <div className="relative mt-5 flex h-2.5 gap-0.5 overflow-hidden rounded-full bg-white/6">
         {stats.totalBytes > 0 &&

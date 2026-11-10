@@ -118,7 +118,7 @@ export function UploadProvider({ children }: { children: ReactNode }) {
       toast({
         type: "success",
         title: succeeded === 1 ? "Upload complete" : `${succeeded} files uploaded`,
-        description: "Your files are saved in this browser.",
+        description: "Your files are safe in the cloud.",
       });
     }
     if (failed > 0) {

@@ -19,7 +19,7 @@ export const metadata: Metadata = {
     default: "GHOST XXX · Private media vault",
     template: "%s · GHOST XXX",
   },
-  description: "A private media vault for your photos and videos. Upload, browse, play and download, stored locally in your browser.",
+  description: "A private media vault for your photos and videos. Upload, browse, play and download, stored online in the cloud.",
   applicationName: "GHOST XXX",
   appleWebApp: { capable: true, title: "GHOST XXX", statusBarStyle: "black-translucent" },
   formatDetection: { telephone: false },

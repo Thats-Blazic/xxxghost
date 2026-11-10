@@ -13,7 +13,7 @@ export const VIEW_CONFIG: Record<ViewKey, ViewConfig> = {
     title: "All Files",
     icon: FolderOpen,
     emptyTitle: "Your vault is empty",
-    emptyDescription: "Upload your first photos and videos. They stay private and are saved right in this browser.",
+    emptyDescription: "Upload your first photos and videos. They are saved online, so you can open them on any device.",
   },
   images: {
     title: "Images",

@@ -11,7 +11,7 @@ import {
 } from "react";
 import { Button } from "@/components/ui/Button";
 import { Dialog } from "@/components/ui/Dialog";
-import { saveBlob, wait } from "@/lib/download";
+import { startDownload, wait } from "@/lib/download";
 import { pluralize } from "@/lib/format";
 import { sanitizeFileName, splitName } from "@/lib/media";
 import type { MediaMeta } from "@/lib/types";
@@ -41,16 +41,14 @@ export function FileActionsProvider({ children }: { children: ReactNode }) {
   const confirm = useConfirm();
   const [renaming, setRenaming] = useState<MediaMeta | null>(null);
 
-  const { getBlob, setFavorite, moveToTrash, restore, deletePermanently } = library;
+  const { setFavorite, moveToTrash, restore, deletePermanently } = library;
   const trashedItems = useMemo(() => library.items.filter((item) => item.trashedAt !== null), [library.items]);
 
   const download = useCallback(
     async (items: MediaMeta[]) => {
       try {
         for (let i = 0; i < items.length; i += 1) {
-          const blob = await getBlob(items[i].id);
-          if (!blob) throw new Error(`"${items[i].name}" could not be read from storage.`);
-          saveBlob(blob, items[i].name);
+          startDownload(items[i].downloadUrl, items[i].name);
           // Browsers throttle rapid multi-downloads; a small gap keeps them all.
           if (i < items.length - 1) await wait(350);
         }
@@ -67,7 +65,7 @@ export function FileActionsProvider({ children }: { children: ReactNode }) {
         });
       }
     },
-    [getBlob, toast],
+    [toast],
   );
 
   const toggleFavorite = useCallback(
@@ -134,7 +132,7 @@ export function FileActionsProvider({ children }: { children: ReactNode }) {
       if (items.length === 0) return false;
       const ok = await confirm({
         title: `Delete ${describe(items)} forever?`,
-        description: "This can't be undone. The original file will be removed from this browser.",
+        description: "This can't be undone. The file will be erased from cloud storage.",
         confirmLabel: "Delete forever",
         tone: "danger",
       });

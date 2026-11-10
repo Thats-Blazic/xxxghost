@@ -1,5 +1,6 @@
 "use client";
 
+import { upload } from "@vercel/blob/client";
 import {
   createContext,
   useCallback,
@@ -10,180 +11,281 @@ import {
   useState,
   type ReactNode,
 } from "react";
-import * as db from "@/lib/db";
-import { formatBytes } from "@/lib/format";
-import { processMedia, resolveMime, sanitizeFileName, validateFile } from "@/lib/media";
-import type { MediaMeta } from "@/lib/types";
+import { api, ApiError } from "@/lib/api";
+import { processMedia, resolveMime, sanitizeFileName, uploadContentType, validateFile } from "@/lib/media";
+import type { MediaMeta, MediaPatch } from "@/lib/types";
 
-export type UploadStage = "preparing" | "processing" | "saving";
-export type LibraryStatus = "loading" | "ready" | "error";
+export type UploadStage = "preparing" | "processing" | "uploading" | "saving";
+export type LibraryStatus = "loading" | "ready" | "error" | "locked" | "unconfigured";
+
+const MULTIPART_THRESHOLD = 40 * 1024 * 1024;
 
 interface LibraryContextValue {
   items: MediaMeta[];
   status: LibraryStatus;
   errorMessage: string | null;
+  /** Environment variables the server still needs (only when status is "unconfigured"). */
+  missingConfig: string[];
+  passwordRequired: boolean;
   addFile: (file: File, onProgress?: (progress: number, stage: UploadStage) => void) => Promise<MediaMeta>;
-  getBlob: (id: string) => Promise<Blob | null>;
   rename: (id: string, name: string) => Promise<void>;
   setFavorite: (ids: string[], favorite: boolean) => Promise<void>;
   moveToTrash: (ids: string[]) => Promise<void>;
   restore: (ids: string[]) => Promise<void>;
   deletePermanently: (ids: string[]) => Promise<void>;
+  reload: () => void;
+  unlock: (password: string) => Promise<void>;
+  lock: () => Promise<void>;
 }
 
 const LibraryContext = createContext<LibraryContextValue | null>(null);
 
+/** Unguessable id: it is part of the file's public URL. */
 function makeId(): string {
-  return `${Date.now().toString(36)}${Math.random().toString(36).slice(2, 10)}`;
+  const bytes = new Uint8Array(16);
+  crypto.getRandomValues(bytes);
+  return Array.from(bytes, (byte) => byte.toString(16).padStart(2, "0")).join("");
+}
+
+function describeUploadError(error: unknown): Error {
+  if (error instanceof ApiError) return error;
+  const message = error instanceof Error ? error.message : "Upload failed.";
+  if (/token|unauthor|401/i.test(message)) return new Error("You're locked out. Reload the page and enter your password again.");
+  if (/not.?configured|BLOB_READ_WRITE_TOKEN/i.test(message)) return new Error("Cloud storage isn't set up yet.");
+  if (/exceeded|quota|limit/i.test(message)) return new Error("Your cloud storage is full or over its plan limit.");
+  return new Error(message);
 }
 
 export function LibraryProvider({ children }: { children: ReactNode }) {
   const [items, setItems] = useState<MediaMeta[]>([]);
   const [status, setStatus] = useState<LibraryStatus>("loading");
   const [errorMessage, setErrorMessage] = useState<string | null>(null);
+  const [missingConfig, setMissingConfig] = useState<string[]>([]);
+  const [passwordRequired, setPasswordRequired] = useState(false);
   const channelRef = useRef<BroadcastChannel | null>(null);
+  const statusRef = useRef<LibraryStatus>("loading");
+
+  const applyStatus = useCallback((next: LibraryStatus) => {
+    statusRef.current = next;
+    setStatus(next);
+  }, []);
 
   const load = useCallback(() => {
-    db.listMeta()
-      .then((all) => {
-        setItems(all);
-        setStatus("ready");
+    api
+      .list()
+      .then((result) => {
+        setItems(result.items);
+        setPasswordRequired(result.passwordRequired);
         setErrorMessage(null);
+        applyStatus("ready");
       })
       .catch((error: unknown) => {
-        setStatus("error");
-        setErrorMessage(error instanceof Error ? error.message : "Could not open local storage.");
+        if (error instanceof ApiError && error.code === "locked") {
+          applyStatus("locked");
+        } else if (error instanceof ApiError && error.code === "not_configured") {
+          setMissingConfig(error.missing);
+          applyStatus("unconfigured");
+        } else {
+          setErrorMessage(error instanceof Error ? error.message : "Could not load your files.");
+          // Keep showing files we already have when a background refresh fails.
+          if (statusRef.current !== "ready") applyStatus("error");
+        }
       });
-  }, []);
+  }, [applyStatus]);
 
   useEffect(() => {
     load();
-    // Keep several open tabs in sync.
-    if (typeof BroadcastChannel === "undefined") return;
-    const channel = new BroadcastChannel("ghost-xxx-library");
-    channel.onmessage = () => load();
-    channelRef.current = channel;
+
+    // Keep other tabs and other devices fresh.
+    const refresh = () => statusRef.current === "ready" && document.visibilityState === "visible" && load();
+    window.addEventListener("focus", refresh);
+    document.addEventListener("visibilitychange", refresh);
+
+    let channel: BroadcastChannel | null = null;
+    if (typeof BroadcastChannel !== "undefined") {
+      channel = new BroadcastChannel("ghost-xxx-library");
+      channel.onmessage = () => load();
+      channelRef.current = channel;
+    }
     return () => {
-      channel.close();
+      window.removeEventListener("focus", refresh);
+      document.removeEventListener("visibilitychange", refresh);
+      channel?.close();
       channelRef.current = null;
     };
   }, [load]);
 
   const notifyOtherTabs = useCallback(() => channelRef.current?.postMessage("changed"), []);
 
+  const handleAuthLoss = useCallback(
+    (error: unknown) => {
+      if (error instanceof ApiError && error.code === "locked") applyStatus("locked");
+    },
+    [applyStatus],
+  );
+
   const addFile = useCallback<LibraryContextValue["addFile"]>(
     async (file, onProgress) => {
       const report = onProgress ?? (() => undefined);
-      report(0.03, "preparing");
+      report(0.02, "preparing");
 
       const validation = validateFile(file);
       if (!validation.ok) throw new Error(validation.error);
+      const { kind } = validation;
 
-      if (navigator.storage?.estimate) {
-        const { usage = 0, quota = 0 } = await navigator.storage.estimate();
-        if (quota && usage + file.size > quota) {
-          throw new Error(
-            `Not enough free space in this browser (${formatBytes(Math.max(0, quota - usage))} left).`,
-          );
-        }
-      }
-      void navigator.storage?.persist?.().catch(() => undefined);
+      report(0.04, "processing");
+      const processed = await processMedia(file, kind);
 
-      report(0.1, "processing");
-      const processed = await processMedia(file, validation.kind);
-
-      report(0.6, "saving");
-      const mime = resolveMime(file, validation.kind);
-      const meta: MediaMeta = {
-        id: makeId(),
-        name: sanitizeFileName(file.name) || `file-${Date.now()}`,
-        mime,
-        kind: validation.kind,
-        size: file.size,
-        createdAt: Date.now(),
-        favorite: false,
-        trashedAt: null,
-        ...processed,
-      };
+      const id = makeId();
+      const name = sanitizeFileName(file.name) || `file-${Date.now()}`;
+      const mime = resolveMime(file, kind);
 
       try {
-        await db.saveMedia(meta, new Blob([file], { type: mime }));
-      } catch (error) {
-        if (db.isQuotaError(error)) {
-          throw new Error("Browser storage is full. Delete some files and try again.");
-        }
-        throw error instanceof Error ? error : new Error("Could not save the file.");
-      }
+        report(0.1, "uploading");
+        const uploaded = await upload(`files/${id}/${name}`, file, {
+          access: "public",
+          handleUploadUrl: "/api/upload",
+          contentType: uploadContentType(file, kind),
+          multipart: file.size > MULTIPART_THRESHOLD,
+          onUploadProgress: ({ percentage }) => report(0.1 + (percentage / 100) * 0.8, "uploading"),
+        });
 
-      setItems((previous) => [meta, ...previous]);
-      notifyOtherTabs();
-      report(1, "saving");
-      return meta;
+        let thumbUrl: string | undefined;
+        if (processed.thumb) {
+          report(0.92, "saving");
+          try {
+            const thumb = await upload(`thumbs/${id}/thumb`, processed.thumb, {
+              access: "public",
+              handleUploadUrl: "/api/upload",
+              contentType: processed.thumb.type || "image/webp",
+            });
+            thumbUrl = thumb.url;
+          } catch {
+            // A missing thumbnail is not worth failing the upload for.
+          }
+        }
+
+        report(0.96, "saving");
+        const { item } = await api.register({
+          id,
+          name,
+          mime,
+          kind,
+          size: file.size,
+          width: processed.width,
+          height: processed.height,
+          duration: processed.duration,
+          url: uploaded.url,
+          downloadUrl: uploaded.downloadUrl,
+          thumbUrl,
+        });
+
+        setItems((previous) => [item, ...previous.filter((existing) => existing.id !== item.id)]);
+        notifyOtherTabs();
+        report(1, "saving");
+        return item;
+      } catch (error) {
+        handleAuthLoss(error);
+        throw describeUploadError(error);
+      }
     },
-    [notifyOtherTabs],
+    [notifyOtherTabs, handleAuthLoss],
   );
 
-  const getBlob = useCallback(async (id: string) => (await db.getBlob(id)) ?? null, []);
-
-  /** Applies a patch to metadata records, persists, then updates React state. */
-  const patch = useCallback(
-    async (ids: string[], change: (meta: MediaMeta) => MediaMeta) => {
-      const idSet = new Set(ids);
-      const updated = items.filter((item) => idSet.has(item.id)).map(change);
-      if (updated.length === 0) return;
-      await db.updateMeta(updated);
+  const applyUpdated = useCallback(
+    (updated: MediaMeta[]) => {
       const byId = new Map(updated.map((item) => [item.id, item]));
       setItems((previous) => previous.map((item) => byId.get(item.id) ?? item));
       notifyOtherTabs();
     },
-    [items, notifyOtherTabs],
+    [notifyOtherTabs],
   );
 
-  const rename = useCallback<LibraryContextValue["rename"]>(
-    (id, name) => patch([id], (meta) => ({ ...meta, name })),
-    [patch],
+  const patch = useCallback(
+    async (ids: string[], change: MediaPatch) => {
+      try {
+        const result = await api.patch(ids, change);
+        applyUpdated(result.items);
+      } catch (error) {
+        handleAuthLoss(error);
+        throw error;
+      }
+    },
+    [applyUpdated, handleAuthLoss],
   );
 
+  const rename = useCallback<LibraryContextValue["rename"]>((id, name) => patch([id], { name }), [patch]);
   const setFavorite = useCallback<LibraryContextValue["setFavorite"]>(
-    (ids, favorite) => patch(ids, (meta) => ({ ...meta, favorite })),
+    (ids, favorite) => patch(ids, { favorite }),
     [patch],
   );
-
-  const moveToTrash = useCallback<LibraryContextValue["moveToTrash"]>(
-    (ids) => patch(ids, (meta) => ({ ...meta, trashedAt: Date.now() })),
-    [patch],
-  );
-
-  const restore = useCallback<LibraryContextValue["restore"]>(
-    (ids) => patch(ids, (meta) => ({ ...meta, trashedAt: null })),
-    [patch],
-  );
+  const moveToTrash = useCallback<LibraryContextValue["moveToTrash"]>((ids) => patch(ids, { trashed: true }), [patch]);
+  const restore = useCallback<LibraryContextValue["restore"]>((ids) => patch(ids, { trashed: false }), [patch]);
 
   const deletePermanently = useCallback<LibraryContextValue["deletePermanently"]>(
     async (ids) => {
       if (ids.length === 0) return;
-      await db.deleteMedia(ids);
-      const idSet = new Set(ids);
-      setItems((previous) => previous.filter((item) => !idSet.has(item.id)));
-      notifyOtherTabs();
+      try {
+        const result = await api.remove(ids);
+        const removed = new Set(result.ids);
+        setItems((previous) => previous.filter((item) => !removed.has(item.id)));
+        notifyOtherTabs();
+      } catch (error) {
+        handleAuthLoss(error);
+        throw error;
+      }
     },
-    [notifyOtherTabs],
+    [notifyOtherTabs, handleAuthLoss],
   );
+
+  const unlock = useCallback(
+    async (password: string) => {
+      await api.login(password);
+      applyStatus("loading");
+      load();
+    },
+    [applyStatus, load],
+  );
+
+  const lock = useCallback(async () => {
+    await api.logout();
+    setItems([]);
+    applyStatus("locked");
+  }, [applyStatus]);
 
   const value = useMemo<LibraryContextValue>(
     () => ({
       items,
       status,
       errorMessage,
+      missingConfig,
+      passwordRequired,
       addFile,
-      getBlob,
       rename,
       setFavorite,
       moveToTrash,
       restore,
       deletePermanently,
+      reload: load,
+      unlock,
+      lock,
     }),
-    [items, status, errorMessage, addFile, getBlob, rename, setFavorite, moveToTrash, restore, deletePermanently],
+    [
+      items,
+      status,
+      errorMessage,
+      missingConfig,
+      passwordRequired,
+      addFile,
+      rename,
+      setFavorite,
+      moveToTrash,
+      restore,
+      deletePermanently,
+      load,
+      unlock,
+      lock,
+    ],
   );
 
   return <LibraryContext.Provider value={value}>{children}</LibraryContext.Provider>;

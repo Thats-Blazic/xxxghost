@@ -207,10 +207,10 @@ export function processMedia(file: File, kind: MediaKind): Promise<ProcessedMedi
 }
 
 /**
- * Chrome plays H.264/VP9 Matroska files when they're labelled as WebM, so for playback
- * we re-label MKV blobs (no data is copied, blobs are references).
+ * Content type to serve the file with. Chrome plays H.264/VP9 Matroska files when they're labelled
+ * as WebM, so MKV is stored with that label (the file itself is never changed).
  */
-export function playbackBlob(blob: Blob, name: string): Blob {
-  if (getExtension(name) === "mkv") return new Blob([blob], { type: "video/webm" });
-  return blob;
+export function uploadContentType(file: { name: string; type: string }, kind: MediaKind): string {
+  if (getExtension(file.name) === "mkv") return "video/webm";
+  return resolveMime(file, kind) || (kind === "image" ? "image/jpeg" : "video/mp4");
 }

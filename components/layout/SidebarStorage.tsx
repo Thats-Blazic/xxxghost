@@ -1,70 +1,35 @@
 "use client";
 
-import { HardDrive, ShieldCheck, ShieldAlert } from "lucide-react";
+import { Cloud, Lock } from "lucide-react";
 import { useMemo } from "react";
 import { useLibrary } from "@/components/providers/LibraryProvider";
-import { useToast } from "@/components/providers/ToastProvider";
-import { useStorageEstimate } from "@/hooks/useStorageEstimate";
-import { usePersistentStorage } from "@/hooks/usePersistentStorage";
-import { formatBytes } from "@/lib/format";
+import { formatBytes, pluralize } from "@/lib/format";
 
-/** Compact storage meter shown at the bottom of the sidebar / drawer. */
+/** Compact cloud-storage summary shown at the bottom of the sidebar / drawer. */
 export function SidebarStorage() {
-  const { items } = useLibrary();
-  const toast = useToast();
-  const { persisted, request } = usePersistentStorage();
+  const { items, status, passwordRequired, lock } = useLibrary();
   const used = useMemo(() => items.reduce((sum, item) => sum + item.size, 0), [items]);
-  const estimate = useStorageEstimate(used);
-  const percent = estimate ? Math.min(100, Math.max(used > 0 ? 1.5 : 0, (used / estimate.quota) * 100)) : 0;
-
-  async function protect() {
-    const granted = await request();
-    toast(
-      granted
-        ? { type: "success", title: "Storage protected", description: "Your browser won't delete your files automatically." }
-        : {
-            type: "info",
-            title: "Your browser said no",
-            description: "Try installing the app to your home screen or bookmarking the site, then press the button again.",
-            duration: 7000,
-          },
-    );
-  }
 
   return (
     <div className="rounded-2xl border border-line bg-raised/70 p-4">
       <div className="flex items-center gap-2 text-sm font-medium text-zinc-200">
-        <HardDrive className="size-4 text-violet-300" />
-        Local storage
+        <Cloud className="size-4 text-violet-300" />
+        Cloud storage
       </div>
-      <div className="mt-3 h-1.5 overflow-hidden rounded-full bg-white/8">
-        <div
-          className="h-full rounded-full bg-gradient-to-r from-violet-500 to-fuchsia-500 transition-[width] duration-700"
-          style={{ width: `${percent}%` }}
-        />
-      </div>
-      <p className="mt-2.5 text-xs leading-relaxed text-zinc-500">
-        <span className="font-medium text-zinc-300">{formatBytes(used)}</span> used
-        {estimate ? ` · ${formatBytes(Math.max(0, estimate.quota - estimate.usage), 0)} free` : ""}
+      <p className="mt-3 text-2xl font-semibold tracking-tight">{status === "ready" ? formatBytes(used) : "—"}</p>
+      <p className="mt-0.5 text-xs text-zinc-500">
+        {status === "ready" ? `${pluralize(items.length, "file")} stored online` : "Connecting…"}
       </p>
-
-      {persisted === true && (
-        <p className="mt-2 flex items-center gap-1.5 text-[11px] font-medium text-emerald-400">
-          <ShieldCheck className="size-3.5" />
-          Protected from auto-cleanup
-        </p>
-      )}
-      {persisted === false && (
+      {passwordRequired && status === "ready" && (
         <button
           type="button"
-          onClick={() => void protect()}
-          className="mt-3 flex w-full items-center justify-center gap-1.5 rounded-lg border border-amber-500/30 bg-amber-500/10 px-3 py-2 text-xs font-medium text-amber-200 transition hover:bg-amber-500/20"
+          onClick={() => void lock()}
+          className="mt-3 flex w-full items-center justify-center gap-1.5 rounded-lg border border-line bg-surface px-3 py-2 text-xs font-medium text-zinc-300 transition hover:border-white/20 hover:text-white"
         >
-          <ShieldAlert className="size-3.5" />
-          Protect storage
+          <Lock className="size-3.5" />
+          Lock vault
         </button>
       )}
-      {persisted === null && <p className="mt-1 text-[11px] leading-relaxed text-zinc-600">Saved on this device only.</p>}
     </div>
   );
 }

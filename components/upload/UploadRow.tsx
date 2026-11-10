@@ -11,6 +11,7 @@ import { formatBytes } from "@/lib/format";
 const STAGE_LABEL = {
   preparing: "Preparing…",
   processing: "Creating preview…",
+  uploading: "Uploading to the cloud…",
   saving: "Saving to your vault…",
 } as const;
 

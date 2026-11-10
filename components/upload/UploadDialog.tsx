@@ -36,7 +36,7 @@ export function UploadDialog() {
       onClose={close}
       size="lg"
       title="Upload files"
-      description="Add photos and videos. Everything is stored privately in this browser."
+      description="Add photos and videos. Everything is saved online, so you can open it from any device."
       footer={
         <>
           <div className="mr-auto hidden text-sm text-zinc-500 sm:block">
@@ -108,7 +108,7 @@ export function UploadDialog() {
           <p className="relative mt-4 text-xs leading-relaxed text-zinc-600">
             {SUPPORTED_LABEL}
             <br />
-            No file size limit, only your free browser space
+            Large videos are uploaded in parts
           </p>
           <input
             ref={inputRef}

@@ -121,8 +121,8 @@ export function LibraryView({ view }: { view: ViewKey }) {
     content = (
       <EmptyState
         icon={TriangleAlert}
-        title="Local storage isn't available"
-        description={`${errorMessage ?? "IndexedDB could not be opened."} Private browsing modes can block it. Try a regular window and reload.`}
+        title="Couldn't reach your cloud storage"
+        description={`${errorMessage ?? "The request failed."} Check your connection and try again.`}
         action={<Button onClick={() => window.location.reload()}>Reload</Button>}
       />
     );
@@ -185,7 +185,7 @@ export function LibraryView({ view }: { view: ViewKey }) {
             <h1 className="text-3xl font-semibold tracking-tight sm:text-4xl">
               Your <span className="bg-gradient-to-r from-violet-400 to-fuchsia-400 bg-clip-text text-transparent">vault</span>
             </h1>
-            <p className="mt-1.5 text-sm text-zinc-500 sm:text-base">Private photos and videos, stored on this device.</p>
+            <p className="mt-1.5 text-sm text-zinc-500 sm:text-base">Private photos and videos, stored online and available on every device.</p>
           </div>
           <Overview items={items} loading={loading} />
 

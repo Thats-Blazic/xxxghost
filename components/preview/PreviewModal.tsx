@@ -1,6 +1,6 @@
 "use client";
 
-import { ChevronLeft, ChevronRight, Download, Ellipsis, Info, Loader2, Star, TriangleAlert, X } from "lucide-react";
+import { ChevronLeft, ChevronRight, Download, Ellipsis, Info, Star, X } from "lucide-react";
 import { useCallback, useEffect, useMemo, useState } from "react";
 import { createPortal } from "react-dom";
 import { useFileActions } from "@/components/providers/FileActionsProvider";
@@ -10,11 +10,8 @@ import { Button } from "@/components/ui/Button";
 import { IconButton } from "@/components/ui/IconButton";
 import { Menu, type MenuPosition } from "@/components/ui/Menu";
 import { useLockBodyScroll } from "@/hooks/useLockBodyScroll";
-import { useMediaBlob } from "@/hooks/useMediaBlob";
-import { useObjectUrl } from "@/hooks/useObjectUrl";
 import { cn } from "@/lib/cn";
 import { formatBytes, formatDate, formatDuration } from "@/lib/format";
-import { playbackBlob } from "@/lib/media";
 import type { MediaMeta } from "@/lib/types";
 import { ImageViewer } from "./ImageViewer";
 import { InfoPanel } from "./InfoPanel";
@@ -53,13 +50,8 @@ function PreviewContent({ item, ids, onNavigate, onClose, onRemoved }: PreviewMo
   const prevId = index > 0 ? ids[index - 1] : null;
   const nextId = index >= 0 && index < ids.length - 1 ? ids[index + 1] : null;
 
-  const blobResult = useMediaBlob(item.id);
-  const playable = useMemo(() => {
-    if (!blobResult?.blob) return null;
-    return item.kind === "video" ? playbackBlob(blobResult.blob, item.name) : blobResult.blob;
-  }, [blobResult, item.kind, item.name]);
-  const url = useObjectUrl(playable);
-  const posterUrl = useObjectUrl(item.kind === "video" ? item.thumb : null);
+  const url = item.url;
+  const posterUrl = item.kind === "video" ? (item.thumbUrl ?? null) : null;
 
   const removed = useCallback(() => onRemoved(item.id), [onRemoved, item.id]);
   const menuItems = useFileMenu(item, { onRemoved: removed });
@@ -102,17 +94,7 @@ function PreviewContent({ item, ids, onNavigate, onClose, onRemoved }: PreviewMo
   ].filter(Boolean);
 
   let stage: React.ReactNode;
-  if (!blobResult || (blobResult.blob && !url)) {
-    stage = <Loader2 className="size-10 animate-spin text-violet-300" />;
-  } else if (!blobResult.blob || !url) {
-    stage = (
-      <div className="flex max-w-sm flex-col items-center gap-3 px-6 text-center">
-        <TriangleAlert className="size-10 text-amber-400" />
-        <p className="font-medium">This file could not be loaded</p>
-        <p className="text-sm text-zinc-400">It may have been removed from this browser&apos;s storage.</p>
-      </div>
-    );
-  } else if (item.kind === "image") {
+  if (item.kind === "image") {
     stage = <ImageViewer key={item.id} src={url} alt={item.name} onSwipe={go} />;
   } else {
     stage = (

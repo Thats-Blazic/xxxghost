@@ -5,6 +5,7 @@ import { DropOverlay } from "./DropOverlay";
 import { Header } from "./Header";
 import { MobileNav } from "./MobileNav";
 import { Sidebar } from "./Sidebar";
+import { VaultGate } from "./VaultGate";
 
 export function AppShell({ children }: { children: ReactNode }) {
   return (
@@ -26,6 +27,7 @@ export function AppShell({ children }: { children: ReactNode }) {
       <Drawer />
       <UploadDialog />
       <DropOverlay />
+      <VaultGate />
     </div>
   );
 }

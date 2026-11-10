@@ -1,9 +1,10 @@
 export type MediaKind = "image" | "video";
 
-/** Metadata record kept in the `meta` IndexedDB store. The original file lives in the `blobs` store. */
+/** One file in the vault. The record lives in the cloud index, the file itself in Vercel Blob. */
 export interface MediaMeta {
   id: string;
   name: string;
+  /** MIME type of the original file. */
   mime: string;
   kind: MediaKind;
   size: number;
@@ -15,8 +16,24 @@ export interface MediaMeta {
   height?: number;
   /** Video duration in seconds. */
   duration?: number;
-  /** Small preview image (webp/png) so the grid never needs to load full files. */
-  thumb?: Blob;
+  /** URL the original file is streamed / displayed from. */
+  url: string;
+  /** URL that makes the browser download the original file. */
+  downloadUrl: string;
+  /** Small preview image so grids never need to load full files. */
+  thumbUrl?: string;
+}
+
+/** What the browser sends after it finished uploading a file to storage. */
+export type NewMediaInput = Pick<
+  MediaMeta,
+  "id" | "name" | "mime" | "kind" | "size" | "width" | "height" | "duration" | "url" | "downloadUrl" | "thumbUrl"
+>;
+
+export interface MediaPatch {
+  name?: string;
+  favorite?: boolean;
+  trashed?: boolean;
 }
 
 export type SortKey = "newest" | "oldest" | "name" | "size";

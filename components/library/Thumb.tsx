@@ -1,7 +1,6 @@
 "use client";
 
 import { useState } from "react";
-import { useObjectUrl } from "@/hooks/useObjectUrl";
 import { cn } from "@/lib/cn";
 import type { MediaMeta } from "@/lib/types";
 import { FileTypeIcon } from "./FileTypeIcon";
@@ -13,10 +12,11 @@ interface ThumbProps {
   iconClassName?: string;
 }
 
-/** Thumbnail from the stored preview blob (object URL is revoked automatically). */
+/** Thumbnail served from cloud storage; the file-type icon shows until it has loaded. */
 export function Thumb({ item, className, imageClassName, iconClassName }: ThumbProps) {
-  const url = useObjectUrl(item.thumb);
+  const url = item.thumbUrl ?? null;
   const [loadedUrl, setLoadedUrl] = useState<string | null>(null);
+  const [failedUrl, setFailedUrl] = useState<string | null>(null);
   const loaded = url !== null && loadedUrl === url;
 
   return (
@@ -24,8 +24,8 @@ export function Thumb({ item, className, imageClassName, iconClassName }: ThumbP
       <div className="absolute inset-0 flex items-center justify-center">
         <FileTypeIcon item={item} className={cn("size-8 text-zinc-700", iconClassName)} />
       </div>
-      {url && (
-        // eslint-disable-next-line @next/next/no-img-element -- local blob preview
+      {url && failedUrl !== url && (
+        // eslint-disable-next-line @next/next/no-img-element -- remote user media from cloud storage
         <img
           src={url}
           alt=""
@@ -33,6 +33,7 @@ export function Thumb({ item, className, imageClassName, iconClassName }: ThumbP
           decoding="async"
           draggable={false}
           onLoad={() => setLoadedUrl(url)}
+          onError={() => setFailedUrl(url)}
           className={cn(
             "absolute inset-0 size-full object-cover transition-opacity duration-500",
             loaded ? "opacity-100" : "opacity-0",

@@ -13,7 +13,7 @@ import {
 } from "react";
 import { api, ApiError } from "@/lib/api";
 import { processMedia, resolveMime, sanitizeFileName, uploadContentType, validateFile } from "@/lib/media";
-import type { MediaMeta, MediaPatch } from "@/lib/types";
+import type { MediaMeta, MediaPatch, NewMediaInput } from "@/lib/types";
 
 export type UploadStage = "preparing" | "processing" | "uploading" | "saving";
 export type LibraryStatus = "loading" | "ready" | "error" | "locked" | "unconfigured";
@@ -45,6 +45,28 @@ function makeId(): string {
   const bytes = new Uint8Array(16);
   crypto.getRandomValues(bytes);
   return Array.from(bytes, (byte) => byte.toString(16).padStart(2, "0")).join("");
+}
+
+/**
+ * Files upload in parallel, but adding them to the shared index happens one at a time so they
+ * never fight over it. A transient failure is retried a few times.
+ */
+let registerChain: Promise<unknown> = Promise.resolve();
+
+function registerInOrder(item: NewMediaInput): Promise<{ item: MediaMeta }> {
+  const run = registerChain.then(async () => {
+    for (let attempt = 1; ; attempt += 1) {
+      try {
+        return await api.register(item);
+      } catch (error) {
+        const transient = error instanceof ApiError && (error.status >= 500 || error.status === 409 || error.status === 0);
+        if (!transient || attempt >= 4) throw error;
+        await new Promise((resolve) => setTimeout(resolve, 700 * attempt));
+      }
+    }
+  });
+  registerChain = run.catch(() => undefined);
+  return run;
 }
 
 function describeUploadError(error: unknown): Error {
@@ -166,7 +188,7 @@ export function LibraryProvider({ children }: { children: ReactNode }) {
         }
 
         report(0.96, "saving");
-        const { item } = await api.register({
+        const { item } = await registerInOrder({
           id,
           name,
           mime,

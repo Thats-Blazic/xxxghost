@@ -46,7 +46,7 @@ export async function listItems(): Promise<MediaMeta[]> {
 /** Read-modify-write with optimistic concurrency. */
 async function mutate<T>(change: (items: MediaMeta[]) => { items: MediaMeta[]; result: T }): Promise<T> {
   let lastError: unknown;
-  for (let attempt = 0; attempt < 8; attempt += 1) {
+  for (let attempt = 0; attempt < 12; attempt += 1) {
     const { items, etag } = await readIndex();
     const next = change(items);
     try {
@@ -56,7 +56,9 @@ async function mutate<T>(change: (items: MediaMeta[]) => { items: MediaMeta[]; r
       lastError = error;
       const conflict = error instanceof BlobPreconditionFailedError || etag === null;
       if (!conflict) throw error;
-      await new Promise((resolve) => setTimeout(resolve, 80 + Math.random() * 220));
+      // Exponential backoff with jitter; also gives a freshly written index time to become readable.
+      const delay = Math.min(1500, 120 * 2 ** attempt) * (0.6 + Math.random() * 0.8);
+      await new Promise((resolve) => setTimeout(resolve, delay));
     }
   }
   throw lastError instanceof Error ? lastError : new Error("Could not update the library, please try again.");

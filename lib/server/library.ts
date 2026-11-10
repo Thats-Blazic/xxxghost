@@ -1,6 +1,6 @@
 import "server-only";
 import { createHmac } from "node:crypto";
-import { BlobPreconditionFailedError, del, get, put } from "@vercel/blob";
+import { BlobNotFoundError, BlobPreconditionFailedError, del, head, put } from "@vercel/blob";
 import type { MediaKind, MediaMeta, MediaPatch, NewMediaInput } from "@/lib/types";
 
 /**
@@ -21,11 +21,25 @@ interface IndexFile {
   items: MediaMeta[];
 }
 
+/**
+ * Public blobs are served from a CDN cache, and `get({ useCache: false })` only bypasses it for private
+ * blobs. So the current ETag comes from the (uncached) management API via `head`, and the content is
+ * fetched with that ETag in the query string: a new version always has a new cache key.
+ */
 async function readIndex(): Promise<{ items: MediaMeta[]; etag: string | null }> {
-  const result = await get(indexPath(), { access: "public", useCache: false });
-  if (!result || result.statusCode !== 200) return { items: [], etag: null };
-  const parsed = JSON.parse(await new Response(result.stream).text()) as Partial<IndexFile>;
-  return { items: Array.isArray(parsed.items) ? parsed.items : [], etag: result.blob.etag };
+  let meta;
+  try {
+    meta = await head(indexPath());
+  } catch (error) {
+    if (error instanceof BlobNotFoundError) return { items: [], etag: null };
+    throw error;
+  }
+
+  const response = await fetch(`${meta.url}?v=${encodeURIComponent(meta.etag)}`, { cache: "no-store" });
+  if (response.status === 404) return { items: [], etag: null };
+  if (!response.ok) throw new Error(`Could not read the library (${response.status}).`);
+  const parsed = (await response.json()) as Partial<IndexFile>;
+  return { items: Array.isArray(parsed.items) ? parsed.items : [], etag: meta.etag };
 }
 
 async function writeIndex(items: MediaMeta[], etag: string | null): Promise<void> {
@@ -54,8 +68,7 @@ async function mutate<T>(change: (items: MediaMeta[]) => { items: MediaMeta[]; r
       return next.result;
     } catch (error) {
       lastError = error;
-      const conflict = error instanceof BlobPreconditionFailedError || etag === null;
-      if (!conflict) throw error;
+      if (!(error instanceof BlobPreconditionFailedError)) throw error;
       // Exponential backoff with jitter; also gives a freshly written index time to become readable.
       const delay = Math.min(1500, 120 * 2 ** attempt) * (0.6 + Math.random() * 0.8);
       await new Promise((resolve) => setTimeout(resolve, delay));
